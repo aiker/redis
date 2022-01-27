@@ -135,17 +135,35 @@ func (hs hooks) withContext(ctx context.Context, fn func() error) error {
 //------------------------------------------------------------------------------
 
 type baseClient struct {
-	opt      *Options
-	connPool pool.Pooler
+	opt             *Options
+	connPool        pool.Pooler
+	processPoolChan chan func()
 
 	onClose func() error // hook called when client is closed
 }
 
 func newBaseClient(opt *Options, connPool pool.Pooler) *baseClient {
-	return &baseClient{
-		opt:      opt,
-		connPool: connPool,
+	cl := &baseClient{
+		opt:             opt,
+		connPool:        connPool,
+		processPoolChan: make(chan func(), opt.ProcessChanSize),
 	}
+
+	for i := 0; i < opt.ProcessPoolSize; i++ {
+		go func() {
+			for {
+				select {
+				case f, ok := <-cl.processPoolChan:
+					if f == nil || !ok {
+						return
+					}
+					f()
+				}
+			}
+		}()
+	}
+
+	return cl
 }
 
 func (c *baseClient) clone() *baseClient {
@@ -158,10 +176,7 @@ func (c *baseClient) withTimeout(timeout time.Duration) *baseClient {
 	opt.ReadTimeout = timeout
 	opt.WriteTimeout = timeout
 
-	clone := c.clone()
-	clone.opt = opt
-
-	return clone
+	return newBaseClient(opt, c.connPool)
 }
 
 func (c *baseClient) String() string {
@@ -300,7 +315,21 @@ func (c *baseClient) withConn(
 	}
 
 	errc := make(chan error, 1)
-	go func() { errc <- fn(ctx, cn) }()
+
+	f := func() { errc <- fn(ctx, cn) }
+
+	select {
+	case c.processPoolChan <- f:
+		if c.opt.OnProcessPoolUsed != nil {
+			c.opt.OnProcessPoolUsed()
+		}
+	default:
+		// Switch to default behaviour.
+		go f()
+		if c.opt.OnProcessFallbackUsed != nil {
+			c.opt.OnProcessFallbackUsed()
+		}
+	}
 
 	select {
 	case <-done:
@@ -393,6 +422,12 @@ func (c *baseClient) Close() error {
 	if err := c.connPool.Close(); err != nil && firstErr == nil {
 		firstErr = err
 	}
+
+	if c.processPoolChan != nil {
+		close(c.processPoolChan)
+		c.processPoolChan = nil
+	}
+
 	return firstErr
 }
 
