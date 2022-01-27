@@ -80,6 +80,12 @@ type ClusterOptions struct {
 	IdleCheckFrequency time.Duration
 
 	TLSConfig *tls.Config
+
+	ProcessPoolSize int
+	ProcessChanSize int
+
+	OnProcessPoolUsed     func()
+	OnProcessFallbackUsed func()
 }
 
 func (opt *ClusterOptions) init() {
@@ -164,6 +170,12 @@ func (opt *ClusterOptions) clientOptions() *Options {
 		// READONLY command against that node -- setting readOnly to false in such
 		// situations in the options below will prevent that from happening.
 		readOnly: opt.ReadOnly && opt.ClusterSlots == nil,
+
+		ProcessPoolSize: opt.ProcessPoolSize,
+		ProcessChanSize: opt.ProcessChanSize,
+
+		OnProcessPoolUsed:     opt.OnProcessPoolUsed,
+		OnProcessFallbackUsed: opt.OnProcessFallbackUsed,
 	}
 }
 

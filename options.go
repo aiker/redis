@@ -112,6 +112,15 @@ type Options struct {
 
 	// Limiter interface used to implemented circuit breaker or rate limiter.
 	Limiter Limiter
+
+	// Size of the goroutines pool used for executing requests.
+	ProcessPoolSize int
+
+	// The size of the channel used by process pool.
+	ProcessChanSize int
+
+	OnProcessPoolUsed     func()
+	OnProcessFallbackUsed func()
 }
 
 func (opt *Options) init() {
